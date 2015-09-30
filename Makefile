@@ -13,10 +13,11 @@ BUILD_DIR := build
 RELEASE_DIR := /usr/local/bin
 OUTPUT_BIN := bintoc
 
-INCLUDE_PATH := 
+INCLUDE_PATH := -I"/usr/local/Cellar/boost/1.58.0/include"
 
 SOURCE_FILES := bintoc.cpp
 
+CFLAGS += -std=c++11
 SOURCE_OBJECTS := $(addprefix $(BUILD_DIR)/, $(SOURCE_FILES:.cpp=.o) )
 
 all: release

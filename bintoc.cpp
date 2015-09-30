@@ -1,6 +1,8 @@
+#include <cstdint>
 #include <iostream>
 #include <fstream>
 #include <iomanip>
+#include "boost/crc.hpp"
 using namespace std;
 
 #define MAX_NUM_ARGS 3
@@ -41,6 +43,25 @@ int main(int argc, char **argv)
 }
 
 
+uint32_t compute_crc32(istream &stream)
+{
+    static char data;
+    uint32_t crc32;
+    boost::crc_32_type crc_obj;
+
+    stream.seekg(ios::beg);
+    stream.clear();
+    while( !stream.eof() )
+    {
+        stream.get(data);
+        crc_obj.process_byte((unsigned char)data);
+    }
+
+    crc32 = crc_obj.checksum();
+    return crc32;
+}
+
+
 /*
  *  Display tool usage.
  */
@@ -63,8 +84,9 @@ int process_bin_file(const char *in_filename, const char *out_filename)
     ofstream out_file;
     unsigned int num_bytes;
     unsigned int n;
+    uint32_t crc32;
 
-    in_file.open(in_filename, ios::in | ios::binary | ios::ate);
+    in_file.open(in_filename, ios::in | ios::binary);
     if( in_file.fail() )
     {
         cout << "Failed to open file '" << in_filename << "'\n";
@@ -72,9 +94,13 @@ int process_bin_file(const char *in_filename, const char *out_filename)
     }
     else
     {
+        crc32 = compute_crc32(in_file);
         num_bytes = in_file.tellg();
+        in_file.clear();
         in_file.seekg(ios::beg);
-        cout << "Opened " << num_bytes << " byte file '" << in_filename << "'\n";
+        cout << "Opened " << num_bytes << " byte file '"
+             << in_filename << "' with checksum " << hex << crc32 << "\n";
+        cout << dec;
     }
 
     out_file.open(out_filename, ios::out | ios::trunc);
@@ -87,7 +113,12 @@ int process_bin_file(const char *in_filename, const char *out_filename)
 
     out_file << setfill('0');
     out_file << "static const uint8_t BINARY_DATA[] =\n{";
-    for(n=0; n<num_bytes; n++)
+    in_file.read(&data, 1);
+    if( !in_file.eof() )
+    {
+        out_file << "\n    0x" << setw(2) << uppercase << hex << (int)data;
+    }
+    for(n=1; n<num_bytes; n++)
     {
         in_file.read(&data, 1);
         if( in_file.eof() )
@@ -98,7 +129,7 @@ int process_bin_file(const char *in_filename, const char *out_filename)
         {
             if( n % DATA_LINE_SIZE == 0 )
             {
-                out_file << "\n    0x";
+                out_file << ",\n    0x";
             }
             else
             {
@@ -112,7 +143,7 @@ int process_bin_file(const char *in_filename, const char *out_filename)
         }
     }
 
-    out_file << "\n}\n";
+    out_file << "\n};\n";
 
     in_file.close();
     out_file.close();
