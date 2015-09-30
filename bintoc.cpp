@@ -14,6 +14,7 @@ class CRC32_Class
     public:
         CRC32_Class(uint32_t seed);
         void process_byte(uint8_t data);
+        void process_bytes(uint8_t *data, uint32_t size);
         uint32_t checksum(void);
         uint32_t reset(void);
 
@@ -24,6 +25,23 @@ class CRC32_Class
         uint32_t seed_;
         uint32_t crc_;
 };
+
+
+/**
+ * Add 4 byte 32-bit line checksum to output stream.
+ * @param out_file Open output file stream ready for the bytes.
+ * @param data Array holding the data to check.
+ * @param line_size Size of data.
+ */
+void add_line_checksum(ofstream &out_file, uint8_t *data, uint8_t line_size);
+
+
+/**
+ * Compute 32-bit checksum for the binary file.
+ * @param in_file Open file with the binary data.
+ * @return the checksum.
+ */
+uint32_t compute_crc32(ifstream &in_file);
 
 
 /**
@@ -60,15 +78,40 @@ int main(int argc, char **argv)
 
 
 /**
- *
- * @param stream
- * @return
+ * Add 4 byte 32-bit line checksum to output stream.
+ * @param out_file Open output file stream ready for the bytes.
+ * @param data Array holding the data to check.
+ * @param line_size Size of data.
+ */
+void add_line_checksum(ofstream &out_file, uint8_t *data, uint8_t line_size)
+{
+    static CRC32_Class crc_obj(0xFFFFFFFF);
+    static uint32_t temp_crc;
+
+    crc_obj.reset();
+    crc_obj.process_bytes(data, line_size);
+    temp_crc = crc_obj.checksum();
+    for(int i=3; i>=0; i--)
+    {
+        out_file << ", 0x"
+                 << setw(2)
+                 << uppercase
+                 << hex
+                 << (unsigned int)((temp_crc >> (i << 3)) & 0xFF);
+    }
+}
+
+
+/**
+ * Compute 32-bit checksum for the binary file.
+ * @param in_file Open file with the binary data.
+ * @return the checksum.
  */
 uint32_t compute_crc32(ifstream &in_file)
 {
     static char data;
+    static CRC32_Class crc_obj(0xFFFFFFFF);
     uint32_t crc32;
-    CRC32_Class crc_obj(0xFFFFFFFF);
 
     in_file.seekg(ios::beg);
     in_file.clear();
@@ -100,12 +143,14 @@ void display_usage(void)
  */
 int process_bin_file(const char *in_filename, const char *out_filename)
 {
-    static char data;
+    static char data[DATA_LINE_SIZE];
+    static uint32_t crc32;
+    static uint32_t num_bytes;
+    static uint32_t array_size;
+    static uint32_t n = 0;
     ifstream in_file;
     ofstream out_file;
-    unsigned int num_bytes;
-    unsigned int n;
-    uint32_t crc32;
+    int i;
 
     in_file.open(in_filename, ios::in | ios::binary | ios::ate);
     if( in_file.fail() )
@@ -113,16 +158,14 @@ int process_bin_file(const char *in_filename, const char *out_filename)
         cout << "Failed to open file '" << in_filename << "'\n";
         return 0;
     }
-    else
-    {
-        num_bytes = in_file.tellg();
-        crc32 = compute_crc32(in_file);
-        in_file.clear();
-        in_file.seekg(ios::beg);
-        cout << "Opened " << num_bytes << " byte file '"
-             << in_filename << "' with checksum " << hex << crc32 << "\n";
-        cout << dec;
-    }
+
+    num_bytes = in_file.tellg();
+    crc32 = compute_crc32(in_file);
+    in_file.clear();
+    in_file.seekg(ios::beg);
+    cout << "Opened " << num_bytes << " byte file '"
+         << in_filename << "' with checksum " << hex << crc32 << "\n";
+    cout << dec;
 
     out_file.open(out_filename, ios::out | ios::trunc);
     if( out_file.fail() )
@@ -132,24 +175,36 @@ int process_bin_file(const char *in_filename, const char *out_filename)
         return 0;
     }
 
+    array_size = num_bytes / DATA_LINE_SIZE; // 4 bytes extra per line for 32-bit line checksum.
+    if( num_bytes % DATA_LINE_SIZE > 0 )
+    {
+        array_size++;
+    }
+    array_size = num_bytes + array_size * 4;
+
     out_file << setfill('0');
-    out_file << "static const uint32_t BINARY_DATA_SIZE = " << num_bytes << ";\n";
-    out_file << "static const uint8_t BINARY_DATA[BINARY_DATA_SIZE] =\n{";
-    in_file.read(&data, 1);
+    out_file << "static const uint32_t BINARY_CHECKSUM = 0x"
+             << hex << uppercase << crc32 << ";\n" << dec;
+    out_file << "static const uint32_t BINARY_SIZE = " << num_bytes << ";\n";
+    out_file << "static const uint32_t BINARY_DATA_SIZE = " << array_size << ";\n";
+    out_file << "static const uint8_t  BINARY_DATA[BINARY_DATA_SIZE] =\n{";
+    in_file.read(&data[0], 1);
     if( !in_file.eof() )
     {
-        out_file << "\n    0x" << setw(2) << uppercase << hex << (int)data;
+        out_file << "\n    0x" << setw(2) << uppercase << hex << (int)data[0];
     }
-    for(n=1; n<num_bytes; n++)
+    for(n=1;; n++)
     {
-        in_file.read(&data, 1);
+        i = n % DATA_LINE_SIZE;
+        in_file.read(&data[i], 1);
         if( in_file.eof() )
         {
+            add_line_checksum(out_file, (uint8_t *)data, i);
             break;
         }
         else
         {
-            if( n % DATA_LINE_SIZE == 0 )
+            if( i == 0 )
             {
                 out_file << ",\n    0x";
             }
@@ -157,8 +212,14 @@ int process_bin_file(const char *in_filename, const char *out_filename)
             {
                 out_file << ", 0x";
             }
-            out_file << setw(2) << uppercase << hex << (int)data;
+            out_file << setw(2) << uppercase << hex << (int)data[i];
         }
+
+        if( i+1 == DATA_LINE_SIZE )
+        {
+            add_line_checksum(out_file, (uint8_t *)data, n);
+        }
+
         if( (n & 0xFF) == 0 )
         {
             cout << n << " bytes processed...\n";
@@ -184,6 +245,16 @@ CRC32_Class::CRC32_Class(uint32_t seed):
 void CRC32_Class::process_byte(uint8_t data)
 {
     crc_ = (crc_ >> 8) ^ CRC_TABLE[(crc_ ^ data) & 0xFF];
+}
+
+
+void CRC32_Class::process_bytes(uint8_t *data, uint32_t size)
+{
+    uint32_t i;
+    for(i=0; i<size; i++)
+    {
+        this->process_byte(data[i]);
+    }
 }
 
 
