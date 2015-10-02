@@ -115,9 +115,13 @@ uint32_t compute_crc32(ifstream &in_file)
 
     in_file.seekg(ios::beg);
     in_file.clear();
-    while( !in_file.eof() )
+    while( 1 )
     {
         in_file.read(&data, 1);
+        if(in_file.eof())
+        {
+            break;
+        }
         crc_obj.process_byte((uint8_t)data);
     }
 
@@ -143,7 +147,8 @@ void display_usage(void)
  */
 int process_bin_file(const char *in_filename, const char *out_filename)
 {
-    static char data[DATA_LINE_SIZE];
+    static char temp;
+    static unsigned char data[DATA_LINE_SIZE];
     static uint32_t crc32;
     static uint32_t num_bytes;
     static uint32_t array_size;
@@ -183,27 +188,35 @@ int process_bin_file(const char *in_filename, const char *out_filename)
     array_size = num_bytes + array_size * 4;
 
     out_file << setfill('0');
-    out_file << "static const uint32_t BINARY_CHECKSUM = 0x"
-             << hex << uppercase << crc32 << ";\n" << dec;
-    out_file << "static const uint32_t BINARY_SIZE = " << num_bytes << ";\n";
-    out_file << "static const uint32_t BINARY_DATA_SIZE = " << array_size << ";\n";
+    out_file << "#define BINARY_SIZE " << num_bytes << "\n";
+    out_file << "#define BINARY_DATA_SIZE " << array_size << "\n";
+    out_file << "static const uint8_t  BINARY_CHECKSUM[4] = {0x";
+    out_file << setw(2) << uppercase << hex << ((crc32 >> 24) & 0xFF) << ", 0x";
+    out_file << setw(2) << uppercase << hex << ((crc32 >> 16) & 0xFF) << ", 0x";
+    out_file << setw(2) << uppercase << hex << ((crc32 >>  8) & 0xFF) << ", 0x";
+    out_file << setw(2) << uppercase << hex << ((crc32 >>  0) & 0xFF) << "};\n" << dec;
     out_file << "static const uint8_t  BINARY_DATA[BINARY_DATA_SIZE] =\n{";
-    in_file.read(&data[0], 1);
+    in_file.read(&temp, 1);
     if( !in_file.eof() )
     {
+        data[0] = (unsigned char)temp;
         out_file << "\n    0x" << setw(2) << uppercase << hex << (int)data[0];
     }
     for(n=1;; n++)
     {
         i = n % DATA_LINE_SIZE;
-        in_file.read(&data[i], 1);
+        in_file.read(&temp, 1);
         if( in_file.eof() )
         {
-            add_line_checksum(out_file, (uint8_t *)data, i);
+            if( i != 0 )
+            {
+                add_line_checksum(out_file, (uint8_t *)data, i);
+            }
             break;
         }
         else
         {
+            data[i] = (unsigned char)temp;
             if( i == 0 )
             {
                 out_file << ",\n    0x";
@@ -217,7 +230,7 @@ int process_bin_file(const char *in_filename, const char *out_filename)
 
         if( i+1 == DATA_LINE_SIZE )
         {
-            add_line_checksum(out_file, (uint8_t *)data, n);
+            add_line_checksum(out_file, data, DATA_LINE_SIZE);
         }
 
         if( (n & 0xFF) == 0 )
