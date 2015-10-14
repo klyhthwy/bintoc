@@ -35,3 +35,4 @@
 .settings/
 .cproject
 .project
+build/

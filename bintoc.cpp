@@ -140,6 +140,34 @@ void display_usage(void)
 
 
 /**
+ * Pads a file with zeros so that its size is a multiple of 16.
+ * @param in_filename
+ * @return
+ */
+int pad16_bin_file(const char *in_filename)
+{
+    ofstream fout;
+    int file_size;
+
+    fout.open(in_filename, ios::out | ios::binary | ios::app);
+    if( fout.fail() )
+    {
+        cout << "Failed to open file '" << in_filename << "'\n";
+        return 0;
+    }
+
+    while(fout.tellp() % 16)
+    {
+        fout.put('\0');
+    }
+
+    file_size = fout.tellp();
+    fout.close();
+    return file_size;
+}
+
+
+/**
  * Read in_file binary and write a byte array declaration to out_file.
  * @param in_file Filename containing binary data.
  * @param out_file C filename to hold the array declaration.
@@ -157,14 +185,18 @@ int process_bin_file(const char *in_filename, const char *out_filename)
     ofstream out_file;
     int i;
 
-    in_file.open(in_filename, ios::in | ios::binary | ios::ate);
+    num_bytes = pad16_bin_file(in_filename);
+    if(num_bytes == 0)
+    {
+        return 0;
+    }
+    in_file.open(in_filename, ios::in | ios::binary);
     if( in_file.fail() )
     {
         cout << "Failed to open file '" << in_filename << "'\n";
         return 0;
     }
 
-    num_bytes = in_file.tellg();
     crc32 = compute_crc32(in_file);
     in_file.clear();
     in_file.seekg(ios::beg);
@@ -188,6 +220,7 @@ int process_bin_file(const char *in_filename, const char *out_filename)
     array_size = num_bytes + array_size * 4;
 
     out_file << setfill('0');
+    out_file << "#include \"pulseon_firmware.h\"\n\n";
     out_file << "#define BINARY_SIZE " << num_bytes << "\n";
     out_file << "#define BINARY_DATA_SIZE " << array_size << "\n";
     out_file << "static const uint8_t  BINARY_CHECKSUM[4] = {0x";
@@ -239,7 +272,22 @@ int process_bin_file(const char *in_filename, const char *out_filename)
         }
     }
 
-    out_file << "\n};\n";
+    out_file << "\n};\n\n";
+    out_file << "/**\n"
+             << " * Get the firmware object for the current build.\n"
+             << " * @return PulseOn firmware object\n"
+             << " */\n"
+             << "const pulseon_firmware_s *pulseon_get_firmware(void)\n"
+             << "{\n"
+             << "    static const pulseon_firmware_s firmware =\n"
+             << "    {\n"
+             << "        .Binary_Size = BINARY_SIZE,\n"
+             << "        .Binary_Data_Size = BINARY_DATA_SIZE,\n"
+             << "        .Binary_Checksum = BINARY_CHECKSUM,\n"
+             << "        .Binary_Data = BINARY_DATA\n"
+             << "    };\n\n"
+             << "    return &firmware;\n"
+             << "}\n";
 
     in_file.close();
     out_file.close();
