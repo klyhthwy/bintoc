@@ -1,7 +1,4 @@
-CCPATH := /usr/gcc-5.1.0/bin
-CCBIN := g++-5.1.0
-
-CC := $(CCPATH)/$(CCBIN)
+CC := c++
 RM := rm -rf
 MK := mkdir
 CP := cp -v
